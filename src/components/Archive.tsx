@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { FeatureCollection } from 'geojson';
 import MapPane from './MapPane';
 import CollectionPane from './CollectionPane';
+import AboutPane from './AboutPane';
 
 const R2_BASE = 'https://pub-76d24adcec7c46aaa6f0111002b5b9d0.r2.dev';
 const METADATA_URL = import.meta.env.DEV ? '/api/metadata.json' : `${R2_BASE}/metadata.json`;
@@ -41,6 +42,7 @@ export default function Archive() {
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [focusTrigger, setFocusTrigger] = useState(0);
+  const [rightPaneView, setRightPaneView] = useState<'collection' | 'about'>('collection');
 
   const prevSplitRef = useRef(50);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -162,14 +164,7 @@ export default function Archive() {
           <span>Map</span>
         </div>
         <div className="pane__header">
-          <span className="pane__title">Map</span>
-          <button
-            className="pane__collapse-btn"
-            onClick={toggleLeft}
-            aria-label="Collapse map pane"
-          >
-            ◀
-          </button>
+          <span className="pane__title pane__title--site">The Palmach Aerial Collection Explorer</span>
         </div>
         <MapPane
           images={images}
@@ -202,21 +197,32 @@ export default function Archive() {
           <span>Collection</span>
         </div>
         <div className="pane__header">
-          <span className="pane__title">Collection</span>
-          <button
-            className="pane__collapse-btn"
-            onClick={toggleRight}
-            aria-label="Collapse collection pane"
-          >
-            ▶
-          </button>
+          <div className="pane__tabs">
+            <button
+              className={`pane__tab${rightPaneView === 'collection' ? ' pane__tab--active' : ''}`}
+              onClick={() => setRightPaneView('collection')}
+            >
+              Collection
+            </button>
+            <span className="pane__tab-sep">/</span>
+            <button
+              className={`pane__tab${rightPaneView === 'about' ? ' pane__tab--active' : ''}`}
+              onClick={() => setRightPaneView('about')}
+            >
+              About
+            </button>
+          </div>
         </div>
-        <CollectionPane
-          images={images}
-          selectedId={selectedId}
-          onSelectImage={handleSelectImage}
-          onFocusMap={handleFocusMap}
-        />
+        {rightPaneView === 'collection' ? (
+          <CollectionPane
+            images={images}
+            selectedId={selectedId}
+            onSelectImage={handleSelectImage}
+            onFocusMap={handleFocusMap}
+          />
+        ) : (
+          <AboutPane />
+        )}
       </div>
     </div>
   );

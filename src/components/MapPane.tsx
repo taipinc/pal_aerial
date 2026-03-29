@@ -19,27 +19,37 @@ interface MapPaneProps {
   focusTrigger: number;
 }
 
-type BasemapKey = 'light' | 'dark' | 'satellite' | 'satellite-labels';
+type BasemapKey = 'light' | 'dark' | 'satellite' | 'satellite-style';
 
-const SATELLITE_STYLE: maplibregl.StyleSpecification = {
+const CARTO_LIGHT = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json';
+const CARTO_DARK = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+
+const ESRI_SATELLITE_STYLE: maplibregl.StyleSpecification = {
   version: 8,
   sources: {
-    'esri-sat': {
+    'esri-satellite': {
       type: 'raster',
-      tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+      tiles: [
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+      ],
       tileSize: 256,
-      attribution: 'Esri, Maxar, Earthstar Geographics',
       maxzoom: 19,
     },
   },
-  layers: [{ id: 'satellite', type: 'raster', source: 'esri-sat' }],
+  layers: [{ id: 'satellite-layer', type: 'raster', source: 'esri-satellite' }],
 };
 
 const BASEMAPS: { key: BasemapKey; label: string; style: string | maplibregl.StyleSpecification }[] = [
-  { key: 'light', label: 'Map (light)', style: 'https://tiles.stadiamaps.com/styles/alidade_smooth.json' },
-  { key: 'dark', label: 'Map (dark)', style: 'https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json' },
-  { key: 'satellite', label: 'Satellite', style: SATELLITE_STYLE },
-  { key: 'satellite-labels', label: 'Satellite + labels', style: 'https://tiles.stadiamaps.com/styles/alidade_satellite.json' },
+  { key: 'light', label: 'Map (light)', style: CARTO_LIGHT },
+  { key: 'dark', label: 'Map (dark)', style: CARTO_DARK },
+  { key: 'satellite', label: 'Satellite', style: ESRI_SATELLITE_STYLE },
+];
+
+const LABEL_LAYERS = [
+  'boat-label', 'airport-label', 'water-name', 'poi-label', 'road_label',
+  'place-label', 'country-label', 'region-label', 'city-label', 'settlement-label',
+  'airport-label крупный', 'road_label-large', 'road_label-medium', 'road_label-small',
+  'place_label', 'water_label', 'landuse_label', 'mountain_peak_label'
 ];
 
 const FOOTPRINTS_SOURCE = 'footprints';
@@ -57,6 +67,7 @@ export default function MapPane({ images, footprints, selectedId, onSelectImage,
   const [opacity, setOpacity] = useState(DEFAULT_OPACITY);
   const [mapReady, setMapReady] = useState(false);
   const [basemap, setBasemap] = useState<BasemapKey>('light');
+  const [labelsVisible, setLabelsVisible] = useState(true);
   const [footprintsVisible, setFootprintsVisible] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -75,7 +86,10 @@ export default function MapPane({ images, footprints, selectedId, onSelectImage,
 
   // Add footprint layers to map
   const addFootprintLayers = useCallback((map: maplibregl.Map) => {
-    if (map.getSource(FOOTPRINTS_SOURCE)) return;
+    // Clean up any existing sources/layers first
+    if (map.getLayer(FOOTPRINTS_FILL)) map.removeLayer(FOOTPRINTS_FILL);
+    if (map.getLayer(FOOTPRINTS_LINE)) map.removeLayer(FOOTPRINTS_LINE);
+    if (map.getSource(FOOTPRINTS_SOURCE)) map.removeSource(FOOTPRINTS_SOURCE);
 
     // Read color from CSS custom property
     const footprintColor = getComputedStyle(document.documentElement)
@@ -112,6 +126,10 @@ export default function MapPane({ images, footprints, selectedId, onSelectImage,
         'line-opacity': 0.7,
       },
     });
+
+    // Move to top
+    map.moveLayer(FOOTPRINTS_FILL);
+    map.moveLayer(FOOTPRINTS_LINE);
 
     const handleClick = (e: maplibregl.MapLayerMouseEvent) => {
       const feature = e.features?.[0];
@@ -173,17 +191,28 @@ export default function MapPane({ images, footprints, selectedId, onSelectImage,
     const baseStyle = BASEMAPS.find((b) => b.key === key)!.style;
     map.setStyle(baseStyle);
 
-    map.once('styledata', () => {
+    // Both styledata and style.load may fire - handle whichever comes first
+    const handleStyleData = () => {
       map.setCenter(center);
       map.setZoom(zoom);
       map.setBearing(bearing);
       map.setPitch(pitch);
-    });
-
-    map.once('style.load', () => {
       addFootprintLayers(map);
       setMapReady(true);
-    });
+      console.log('[MAP] styledata, basemap:', key);
+    };
+
+    map.once('styledata', handleStyleData);
+    map.once('style.load', handleStyleData);
+    
+    // Fallback: if no event fires within 2 seconds, add layers anyway
+    setTimeout(() => {
+      if (!mapReady) {
+        console.log('[MAP] fallback triggered, basemap:', key);
+        addFootprintLayers(map);
+        setMapReady(true);
+      }
+    }, 2000);
   }, [basemap, addFootprintLayers]);
 
   // Update footprint filter when selection changes
@@ -207,6 +236,25 @@ export default function MapPane({ images, footprints, selectedId, onSelectImage,
     if (map.getLayer(FOOTPRINTS_FILL)) map.setLayoutProperty(FOOTPRINTS_FILL, 'visibility', vis);
     if (map.getLayer(FOOTPRINTS_LINE)) map.setLayoutProperty(FOOTPRINTS_LINE, 'visibility', vis);
   }, [footprintsVisible, mapReady]);
+
+  // Toggle labels visibility
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    if (!labelsVisible) {
+      map.getStyle().layers.forEach(layer => {
+        if (LABEL_LAYERS.some(id => layer.id.includes(id)) || 
+            layer.type === 'symbol' || 
+            (layer.id.includes('label') && !layer.id.includes('ground'))) {
+          try { map.setLayoutProperty(layer.id, 'visibility', 'none'); } catch {}
+        }
+      });
+    } else {
+      map.getStyle().layers.forEach(layer => {
+        try { map.setLayoutProperty(layer.id, 'visibility', 'visible'); } catch {}
+      });
+    }
+  }, [labelsVisible, mapReady]);
 
   // Manage the single selected image overlay
   useEffect(() => {
@@ -238,7 +286,7 @@ export default function MapPane({ images, footprints, selectedId, onSelectImage,
       showToast('Image could not be loaded on map');
     });
 
-    // Add overlay BELOW footprints so footprints stay on top
+    // Add overlay below footprints so footprints stay on top
     map.addLayer(
       {
         id: OVERLAY_LAYER,
@@ -248,6 +296,11 @@ export default function MapPane({ images, footprints, selectedId, onSelectImage,
       },
       FOOTPRINTS_FILL,
     );
+
+    // Force overlay below footprints after adding
+    requestAnimationFrame(() => {
+      map.moveLayer(OVERLAY_LAYER, FOOTPRINTS_FILL);
+    });
 
     loadedOverlayRef.current = selectedId;
 
@@ -289,31 +342,33 @@ export default function MapPane({ images, footprints, selectedId, onSelectImage,
   return (
     <div className="map-pane">
       <div ref={containerRef} className="map-pane__container" />
-      {hasOverlay && (
-        <div className="map-pane__controls">
-          <button className="map-pane__toggle-btn" onClick={toggleOpacity}>
-            {opacity > 0 ? 'Hide' : 'Show'}
-          </button>
-          <label className="map-pane__label">Opacity</label>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.01"
-            value={opacity}
-            onChange={handleOpacityChange}
-            className="map-pane__slider"
-            title={`Opacity: ${Math.round(opacity * 100)}%`}
-          />
-        </div>
-      )}
-      <div className="map-pane__basemap-switcher">
+      <div className="map-pane__controls">
         <button
-          className={`map-pane__basemap-btn${!footprintsVisible ? ' map-pane__basemap-btn--active' : ''}`}
+          className={`map-pane__toggle-btn${!footprintsVisible ? ' map-pane__toggle-btn--active' : ''}`}
           onClick={() => setFootprintsVisible((v) => !v)}
         >
-          {footprintsVisible ? 'Hide footprints' : 'Show footprints'}
+          {footprintsVisible ? 'Footprints: on' : 'Footprints: off'}
         </button>
+        {hasOverlay && (
+          <>
+            <button className="map-pane__toggle-btn" onClick={toggleOpacity}>
+              {opacity > 0 ? 'Hide' : 'Show'}
+            </button>
+            <label className="map-pane__label">Opacity</label>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={opacity}
+              onChange={handleOpacityChange}
+              className="map-pane__slider"
+              title={`Opacity: ${Math.round(opacity * 100)}%`}
+            />
+          </>
+        )}
+      </div>
+      <div className="map-pane__basemap-switcher">
         {BASEMAPS.map((b) => (
           <button
             key={b.key}
@@ -323,6 +378,12 @@ export default function MapPane({ images, footprints, selectedId, onSelectImage,
             {b.label}
           </button>
         ))}
+        <button
+          className={`map-pane__basemap-btn${!labelsVisible ? ' map-pane__basemap-btn--active' : ''}`}
+          onClick={() => setLabelsVisible((v) => !v)}
+        >
+          Labels: {labelsVisible ? 'on' : 'off'}
+        </button>
       </div>
       {toast && <div key={toast} className="map-toast">{toast}</div>}
     </div>
