@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import type { FeatureCollection } from 'geojson';
 import MapPane from './MapPane';
 import CollectionPane from './CollectionPane';
 
-const R2_URL =
-  'https://pub-76d24adcec7c46aaa6f0111002b5b9d0.r2.dev/metadata.json';
-const METADATA_URL =
-  import.meta.env.DEV ? '/api/metadata.json' : R2_URL;
+const R2_BASE = 'https://pub-76d24adcec7c46aaa6f0111002b5b9d0.r2.dev';
+const METADATA_URL = import.meta.env.DEV ? '/api/metadata.json' : `${R2_BASE}/metadata.json`;
+const FOOTPRINTS_URL = import.meta.env.DEV ? '/api/footprints.json' : `${R2_BASE}/footprints.json`;
 
 const MIN_PANE_PCT = 15;
 const MAX_PANE_PCT = 85;
@@ -32,6 +32,7 @@ function readUrlParam(key: string): string | null {
 
 export default function Archive() {
   const [images, setImages] = useState<ImageRecord[] | null>(null);
+  const [footprints, setFootprints] = useState<FeatureCollection | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [selectedId, setSelectedId] = useState<string | null>(() => readUrlParam('id'));
@@ -44,15 +45,15 @@ export default function Archive() {
   const prevSplitRef = useRef(50);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Fetch metadata
+  // Fetch metadata + footprints
   useEffect(() => {
-    fetch(METADATA_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then((data: ImageRecord[]) => {
-        setImages(data);
+    Promise.all([
+      fetch(METADATA_URL).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+      fetch(FOOTPRINTS_URL).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+    ])
+      .then(([data, fp]) => {
+        setImages(data as ImageRecord[]);
+        setFootprints(fp as FeatureCollection);
       })
       .catch((err) => setError(err.message));
   }, []);
@@ -126,7 +127,7 @@ export default function Archive() {
   if (error) {
     return <div className="archive--error">Failed to load archive: {error}</div>;
   }
-  if (!images) {
+  if (!images || !footprints) {
     return <div className="archive--loading">Loading archive…</div>;
   }
 
@@ -160,6 +161,7 @@ export default function Archive() {
         </div>
         <MapPane
           images={images}
+          footprints={footprints}
           selectedId={selectedId}
           onSelectImage={handleSelectImage}
           focusTrigger={focusTrigger}

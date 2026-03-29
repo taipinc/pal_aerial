@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import type { FeatureCollection } from 'geojson';
 
 interface ImageRecord {
   id: string;
@@ -12,55 +13,117 @@ interface ImageRecord {
 
 interface MapPaneProps {
   images: ImageRecord[];
+  footprints: FeatureCollection;
   selectedId: string | null;
   onSelectImage: (id: string) => void;
   focusTrigger: number;
 }
 
-const STYLE_URL = 'https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json';
-const DOTS_SOURCE = 'georef-dots';
-const DOTS_LAYER = 'georef-dots-layer';
+type BasemapKey = 'light' | 'dark' | 'satellite' | 'satellite-labels';
+
+const SATELLITE_STYLE: maplibregl.StyleSpecification = {
+  version: 8,
+  sources: {
+    'esri-sat': {
+      type: 'raster',
+      tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+      tileSize: 256,
+      attribution: 'Esri, Maxar, Earthstar Geographics',
+      maxzoom: 19,
+    },
+  },
+  layers: [{ id: 'satellite', type: 'raster', source: 'esri-sat' }],
+};
+
+const BASEMAPS: { key: BasemapKey; label: string; style: string | maplibregl.StyleSpecification }[] = [
+  { key: 'light', label: 'Map (light)', style: 'https://tiles.stadiamaps.com/styles/alidade_smooth.json' },
+  { key: 'dark', label: 'Map (dark)', style: 'https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json' },
+  { key: 'satellite', label: 'Satellite', style: SATELLITE_STYLE },
+  { key: 'satellite-labels', label: 'Satellite + labels', style: 'https://tiles.stadiamaps.com/styles/alidade_satellite.json' },
+];
+
+const FOOTPRINTS_SOURCE = 'footprints';
+const FOOTPRINTS_FILL = 'footprints-fill';
+const FOOTPRINTS_LINE = 'footprints-line';
 const OVERLAY_SOURCE = 'selected-overlay';
 const OVERLAY_LAYER = 'selected-overlay-layer';
-const DEFAULT_OPACITY = 0.85;
+const DEFAULT_OPACITY = 1.0;
 
-export default function MapPane({ images, selectedId, onSelectImage, focusTrigger }: MapPaneProps) {
+const FOOTPRINT_COLOR = '#7a9cbf';
+
+export default function MapPane({ images, footprints, selectedId, onSelectImage, focusTrigger }: MapPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const loadedOverlayRef = useRef<string | null>(null);
 
   const [opacity, setOpacity] = useState(DEFAULT_OPACITY);
   const [mapReady, setMapReady] = useState(false);
+  const [basemap, setBasemap] = useState<BasemapKey>('light');
+  const [footprintsVisible, setFootprintsVisible] = useState(true);
 
   const onSelectRef = useRef(onSelectImage);
   onSelectRef.current = onSelectImage;
 
-  // Build GeoJSON for dot markers — stable across renders since images loads once
-  const dotsGeoJson = useRef<GeoJSON.FeatureCollection | null>(null);
-  if (!dotsGeoJson.current) {
-    const features: GeoJSON.Feature[] = [];
-    for (const img of images) {
-      if (!img.is_georeferenced || !img.bounds || !img.geo_webp) continue;
-      const [W, S, E, N] = img.bounds;
-      features.push({
-        type: 'Feature',
-        properties: { id: img.id },
-        geometry: {
-          type: 'Point',
-          coordinates: [(W + E) / 2, (S + N) / 2],
-        },
-      });
-    }
-    dotsGeoJson.current = { type: 'FeatureCollection', features };
-  }
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
 
-  // Initialize map — runs once
+  // Add footprint layers to map
+  const addFootprintLayers = useCallback((map: maplibregl.Map) => {
+    if (map.getSource(FOOTPRINTS_SOURCE)) return;
+
+    map.addSource(FOOTPRINTS_SOURCE, {
+      type: 'geojson',
+      data: footprints,
+    });
+
+    const sel = selectedIdRef.current ?? '';
+
+    map.addLayer({
+      id: FOOTPRINTS_FILL,
+      type: 'fill',
+      source: FOOTPRINTS_SOURCE,
+      filter: sel ? ['!=', ['get', 'id'], sel] : ['literal', true],
+      paint: {
+        'fill-color': FOOTPRINT_COLOR,
+        'fill-opacity': 0.15,
+      },
+    });
+
+    map.addLayer({
+      id: FOOTPRINTS_LINE,
+      type: 'line',
+      source: FOOTPRINTS_SOURCE,
+      filter: sel ? ['!=', ['get', 'id'], sel] : ['literal', true],
+      paint: {
+        'line-color': FOOTPRINT_COLOR,
+        'line-width': 1.5,
+        'line-opacity': 0.7,
+      },
+    });
+
+    const handleClick = (e: maplibregl.MapLayerMouseEvent) => {
+      const feature = e.features?.[0];
+      if (feature?.properties?.id) {
+        onSelectRef.current(feature.properties.id);
+      }
+    };
+
+    map.on('click', FOOTPRINTS_FILL, handleClick);
+    map.on('click', FOOTPRINTS_LINE, handleClick);
+    map.on('mouseenter', FOOTPRINTS_FILL, () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', FOOTPRINTS_FILL, () => { map.getCanvas().style.cursor = ''; });
+    map.on('mouseenter', FOOTPRINTS_LINE, () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', FOOTPRINTS_LINE, () => { map.getCanvas().style.cursor = ''; });
+  }, [footprints]);
+
+  // Initialize map
   useEffect(() => {
     if (!containerRef.current) return;
 
+    const baseStyle = BASEMAPS.find((b) => b.key === basemap)!.style;
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: STYLE_URL,
+      style: baseStyle,
       center: [35.0, 32.0],
       zoom: 8,
     });
@@ -69,50 +132,7 @@ export default function MapPane({ images, selectedId, onSelectImage, focusTrigge
     mapRef.current = map;
 
     map.on('load', () => {
-      // Single GeoJSON source + circle layer for all georeferenced dots
-      map.addSource(DOTS_SOURCE, {
-        type: 'geojson',
-        data: dotsGeoJson.current!,
-      });
-
-      map.addLayer({
-        id: DOTS_LAYER,
-        type: 'circle',
-        source: DOTS_SOURCE,
-        paint: {
-          'circle-radius': [
-            'case',
-            ['==', ['get', 'id'], selectedId ?? ''],
-            7,
-            4,
-          ],
-          'circle-color': [
-            'case',
-            ['==', ['get', 'id'], selectedId ?? ''],
-            '#c8a97e',
-            '#7a9cbf',
-          ],
-          'circle-opacity': 0.8,
-          'circle-stroke-width': 1,
-          'circle-stroke-color': 'rgba(255,255,255,0.3)',
-        },
-      });
-
-      // Click handler for dots
-      map.on('click', DOTS_LAYER, (e) => {
-        const feature = e.features?.[0];
-        if (feature?.properties?.id) {
-          onSelectRef.current(feature.properties.id);
-        }
-      });
-
-      map.on('mouseenter', DOTS_LAYER, () => {
-        map.getCanvas().style.cursor = 'pointer';
-      });
-      map.on('mouseleave', DOTS_LAYER, () => {
-        map.getCanvas().style.cursor = '';
-      });
-
+      addFootprintLayers(map);
       setMapReady(true);
     });
 
@@ -124,29 +144,65 @@ export default function MapPane({ images, selectedId, onSelectImage, focusTrigge
     };
   }, [images]);
 
-  // Update dot styles when selection changes
+  // Switch basemap style
+  const switchBasemap = useCallback((key: BasemapKey) => {
+    const map = mapRef.current;
+    if (!map || key === basemap) return;
+
+    const center = map.getCenter();
+    const zoom = map.getZoom();
+    const bearing = map.getBearing();
+    const pitch = map.getPitch();
+
+    setBasemap(key);
+    setMapReady(false);
+    loadedOverlayRef.current = null;
+
+    const baseStyle = BASEMAPS.find((b) => b.key === key)!.style;
+    map.setStyle(baseStyle);
+
+    map.once('styledata', () => {
+      map.setCenter(center);
+      map.setZoom(zoom);
+      map.setBearing(bearing);
+      map.setPitch(pitch);
+    });
+
+    map.once('style.load', () => {
+      addFootprintLayers(map);
+      setMapReady(true);
+    });
+  }, [basemap, addFootprintLayers]);
+
+  // Update footprint filter when selection changes
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
 
     const sel = selectedId ?? '';
-    map.setPaintProperty(DOTS_LAYER, 'circle-radius', [
-      'case', ['==', ['get', 'id'], sel], 7, 4,
-    ]);
-    map.setPaintProperty(DOTS_LAYER, 'circle-color', [
-      'case', ['==', ['get', 'id'], sel], '#c8a97e', '#7a9cbf',
-    ]);
+    const filter = sel ? ['!=', ['get', 'id'], sel] : ['literal', true];
+
+    if (map.getLayer(FOOTPRINTS_FILL)) map.setFilter(FOOTPRINTS_FILL, filter as maplibregl.FilterSpecification);
+    if (map.getLayer(FOOTPRINTS_LINE)) map.setFilter(FOOTPRINTS_LINE, filter as maplibregl.FilterSpecification);
   }, [selectedId, mapReady]);
+
+  // Toggle footprint visibility
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const vis = footprintsVisible ? 'visible' : 'none';
+    if (map.getLayer(FOOTPRINTS_FILL)) map.setLayoutProperty(FOOTPRINTS_FILL, 'visibility', vis);
+    if (map.getLayer(FOOTPRINTS_LINE)) map.setLayoutProperty(FOOTPRINTS_LINE, 'visibility', vis);
+  }, [footprintsVisible, mapReady]);
 
   // Manage the single selected image overlay
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
 
-    const prev = loadedOverlayRef.current;
-
-    // Remove previous overlay if any
-    if (prev) {
+    // Remove previous overlay
+    if (loadedOverlayRef.current) {
       if (map.getLayer(OVERLAY_LAYER)) map.removeLayer(OVERLAY_LAYER);
       if (map.getSource(OVERLAY_SOURCE)) map.removeSource(OVERLAY_SOURCE);
       loadedOverlayRef.current = null;
@@ -162,31 +218,26 @@ export default function MapPane({ images, selectedId, onSelectImage, focusTrigge
     map.addSource(OVERLAY_SOURCE, {
       type: 'image',
       url: img.geo_webp,
-      coordinates: [
-        [W, N], // top-left
-        [E, N], // top-right
-        [E, S], // bottom-right
-        [W, S], // bottom-left
-      ],
+      coordinates: [[W, N], [E, N], [E, S], [W, S]],
     });
 
-    map.addLayer({
-      id: OVERLAY_LAYER,
-      type: 'raster',
-      source: OVERLAY_SOURCE,
-      paint: { 'raster-opacity': opacity },
-    });
+    // Add overlay BELOW footprints so footprints stay on top
+    map.addLayer(
+      {
+        id: OVERLAY_LAYER,
+        type: 'raster',
+        source: OVERLAY_SOURCE,
+        paint: { 'raster-opacity': opacity },
+      },
+      FOOTPRINTS_FILL,
+    );
 
     loadedOverlayRef.current = selectedId;
 
-    // Fly to the image bounds
-    map.fitBounds([[W, S], [E, N]], {
-      padding: 60,
-      duration: 1200,
-    });
+    map.fitBounds([[W, S], [E, N]], { padding: 60, duration: 1200 });
   }, [selectedId, mapReady, images]);
 
-  // Re-fly to selected image when focusTrigger fires
+  // Re-fly when focusTrigger fires
   useEffect(() => {
     if (!focusTrigger) return;
     const map = mapRef.current;
@@ -197,7 +248,7 @@ export default function MapPane({ images, selectedId, onSelectImage, focusTrigge
     map.fitBounds([[W, S], [E, N]], { padding: 60, duration: 1200 });
   }, [focusTrigger, mapReady]);
 
-  // Update overlay opacity when slider changes
+  // Update overlay opacity
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !loadedOverlayRef.current) return;
@@ -207,11 +258,13 @@ export default function MapPane({ images, selectedId, onSelectImage, focusTrigge
   }, [opacity, mapReady]);
 
   const handleOpacityChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setOpacity(parseFloat(e.target.value));
-    },
-    []
+    (e: React.ChangeEvent<HTMLInputElement>) => setOpacity(parseFloat(e.target.value)),
+    [],
   );
+
+  const toggleOpacity = useCallback(() => {
+    setOpacity((prev) => (prev > 0 ? 0 : 1));
+  }, []);
 
   const hasOverlay = selectedId != null &&
     images.some((i) => i.id === selectedId && i.is_georeferenced && i.bounds && i.geo_webp);
@@ -221,6 +274,9 @@ export default function MapPane({ images, selectedId, onSelectImage, focusTrigge
       <div ref={containerRef} className="map-pane__container" />
       {hasOverlay && (
         <div className="map-pane__controls">
+          <button className="map-pane__toggle-btn" onClick={toggleOpacity}>
+            {opacity > 0 ? 'Hide' : 'Show'}
+          </button>
           <label className="map-pane__label">Opacity</label>
           <input
             type="range"
@@ -234,6 +290,23 @@ export default function MapPane({ images, selectedId, onSelectImage, focusTrigge
           />
         </div>
       )}
+      <div className="map-pane__basemap-switcher">
+        <button
+          className={`map-pane__basemap-btn${!footprintsVisible ? ' map-pane__basemap-btn--active' : ''}`}
+          onClick={() => setFootprintsVisible((v) => !v)}
+        >
+          {footprintsVisible ? 'Hide footprints' : 'Show footprints'}
+        </button>
+        {BASEMAPS.map((b) => (
+          <button
+            key={b.key}
+            className={`map-pane__basemap-btn${basemap === b.key ? ' map-pane__basemap-btn--active' : ''}`}
+            onClick={() => switchBasemap(b.key)}
+          >
+            {b.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

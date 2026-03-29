@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React from 'react';
 import type { ImageRecord } from './Archive';
 
 type ViewMode = 'grid' | 'table';
 type GeoFilter = 'all' | 'geo' | 'nogeo';
-type SortKey = 'place_name_original' | 'place_name_current' | 'date' | 'flight_id' | 'is_georeferenced';
+type SortKey = 'id' | 'date' | 'flight_id' | 'is_georeferenced';
 type SortDir = 'asc' | 'desc';
 
 interface CollectionPaneProps {
@@ -36,10 +37,44 @@ export default function CollectionPane({ images, selectedId, onSelectImage, onFo
   const [searchQuery, setSearchQuery] = useState(searchRaw);
   const [geoFilter, setGeoFilter] = useState<GeoFilter>('all');
   const [flightFilter, setFlightFilter] = useState('');
-  const [sortKey, setSortKey] = useState<SortKey>('date');
+  const [sortKey, setSortKey] = useState<SortKey>('id');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to expanded item when selectedId changes
+  useEffect(() => {
+    if (!selectedId) return;
+    const container = scrollRef.current;
+    if (!container) return;
+    // Two attempts: one rAF for quick renders, one timeout for grid reflow
+    let raf: number;
+    let timer: ReturnType<typeof setTimeout>;
+    const scrollToExpanded = () => {
+      const el = container.querySelector('.expanded') as HTMLElement | null;
+      if (!el) return;
+      const containerRect = container.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      const elFits = elRect.height <= containerRect.height;
+      if (elFits) {
+        // Can show it entirely — scroll so bottom is visible with padding
+        if (elRect.bottom > containerRect.bottom) {
+          container.scrollBy({ top: elRect.bottom - containerRect.bottom + 12, behavior: 'smooth' });
+        } else if (elRect.top < containerRect.top) {
+          container.scrollBy({ top: elRect.top - containerRect.top - 12, behavior: 'smooth' });
+        }
+      } else {
+        // Taller than container — align top of expanded to top of container
+        if (elRect.top < containerRect.top || elRect.top > containerRect.bottom) {
+          container.scrollBy({ top: elRect.top - containerRect.top - 12, behavior: 'smooth' });
+        }
+      }
+    };
+    raf = requestAnimationFrame(scrollToExpanded);
+    timer = setTimeout(scrollToExpanded, 100);
+    return () => { cancelAnimationFrame(raf); clearTimeout(timer); };
+  }, [selectedId]);
 
   // Debounce search
   useEffect(() => {
@@ -109,7 +144,7 @@ export default function CollectionPane({ images, selectedId, onSelectImage, onFo
     setFlightFilter('');
   }, []);
 
-  // Prev / Next in filtered set
+  // Prev / Next
   const selectedIndex = sorted.findIndex((img) => img.id === selectedId);
   const goPrev = useCallback(() => {
     if (selectedIndex > 0) onSelectImage(sorted[selectedIndex - 1].id);
@@ -119,6 +154,14 @@ export default function CollectionPane({ images, selectedId, onSelectImage, onFo
   }, [selectedIndex, sorted, onSelectImage]);
 
   const selectedImage = selectedId ? images.find((img) => img.id === selectedId) : null;
+
+  // Close lightbox on Escape
+  useEffect(() => {
+    if (!lightboxSrc) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setLightboxSrc(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lightboxSrc]);
 
   return (
     <div className="collection">
@@ -195,6 +238,7 @@ export default function CollectionPane({ images, selectedId, onSelectImage, onFo
             selectedImage={selectedImage}
             onSelectImage={onSelectImage}
             onFocusMap={onFocusMap}
+            onLightbox={setLightboxSrc}
             goPrev={goPrev}
             goNext={goNext}
             hasPrev={selectedIndex > 0}
@@ -207,6 +251,7 @@ export default function CollectionPane({ images, selectedId, onSelectImage, onFo
             selectedImage={selectedImage}
             onSelectImage={onSelectImage}
             onFocusMap={onFocusMap}
+            onLightbox={setLightboxSrc}
             sortKey={sortKey}
             sortDir={sortDir}
             onSort={handleSort}
@@ -217,6 +262,14 @@ export default function CollectionPane({ images, selectedId, onSelectImage, onFo
           />
         )}
       </div>
+
+      {/* Lightbox */}
+      {lightboxSrc && (
+        <div className="lightbox" onClick={() => setLightboxSrc(null)}>
+          <img src={lightboxSrc} alt="" className="lightbox__image" />
+          <button className="lightbox__close">✕</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -229,17 +282,17 @@ interface GridViewProps {
   selectedImage: ImageRecord | null | undefined;
   onSelectImage: (id: string | null) => void;
   onFocusMap: (id: string) => void;
+  onLightbox: (src: string) => void;
   goPrev: () => void;
   goNext: () => void;
   hasPrev: boolean;
   hasNext: boolean;
 }
 
-function GridView({ images, selectedId, selectedImage, onSelectImage, onFocusMap, goPrev, goNext, hasPrev, hasNext }: GridViewProps) {
+function GridView({ images, selectedId, selectedImage, onSelectImage, onFocusMap, onLightbox, goPrev, goNext, hasPrev, hasNext }: GridViewProps) {
   const gridRef = useRef<HTMLDivElement>(null);
   const [colCount, setColCount] = useState(5);
 
-  // Measure column count from the actual grid layout
   useEffect(() => {
     const el = gridRef.current;
     if (!el) return;
@@ -253,7 +306,6 @@ function GridView({ images, selectedId, selectedImage, onSelectImage, onFocusMap
     return () => ro.disconnect();
   }, []);
 
-  // Find selected index and compute where to insert the expanded panel (after the row ends)
   const selectedIndex = selectedId ? images.findIndex((img) => img.id === selectedId) : -1;
   const insertAfterIndex = selectedIndex >= 0
     ? Math.min(Math.floor(selectedIndex / colCount) * colCount + colCount - 1, images.length - 1)
@@ -285,6 +337,7 @@ function GridView({ images, selectedId, selectedImage, onSelectImage, onFocusMap
               image={selectedImage}
               onClose={() => onSelectImage(null)}
               onFocusMap={onFocusMap}
+              onLightbox={onLightbox}
               goPrev={goPrev}
               goNext={goNext}
               hasPrev={hasPrev}
@@ -305,6 +358,7 @@ interface TableViewProps {
   selectedImage: ImageRecord | null | undefined;
   onSelectImage: (id: string | null) => void;
   onFocusMap: (id: string) => void;
+  onLightbox: (src: string) => void;
   sortKey: SortKey;
   sortDir: SortDir;
   onSort: (key: SortKey) => void;
@@ -315,14 +369,13 @@ interface TableViewProps {
 }
 
 const TABLE_COLS: { key: SortKey; label: string }[] = [
-  { key: 'place_name_original', label: 'Original name' },
-  { key: 'place_name_current', label: 'Current name' },
+  { key: 'id', label: 'ID' },
   { key: 'date', label: 'Date' },
   { key: 'flight_id', label: 'Flight' },
   { key: 'is_georeferenced', label: 'Georef' },
 ];
 
-function TableView({ images, selectedId, selectedImage, onSelectImage, onFocusMap, sortKey, sortDir, onSort, goPrev, goNext, hasPrev, hasNext }: TableViewProps) {
+function TableView({ images, selectedId, selectedImage, onSelectImage, onFocusMap, onLightbox, sortKey, sortDir, onSort, goPrev, goNext, hasPrev, hasNext }: TableViewProps) {
   return (
     <table className="table-view">
       <thead>
@@ -356,19 +409,19 @@ function TableView({ images, selectedId, selectedImage, onSelectImage, onFocusMa
                   <div className="table-view__thumb-placeholder" />
                 )}
               </td>
-              <td className="table-view__td">{img.place_name_original}</td>
-              <td className="table-view__td">{img.place_name_current}</td>
+              <td className="table-view__td">{img.id}</td>
               <td className="table-view__td">{img.date}</td>
               <td className="table-view__td">{img.flight_id}</td>
               <td className="table-view__td">{img.is_georeferenced ? '✓' : ''}</td>
             </tr>
             {img.id === selectedId && selectedImage && (
               <tr className="table-view__expanded-row">
-                <td colSpan={6}>
+                <td colSpan={5}>
                   <ExpandedItem
                     image={selectedImage}
                     onClose={() => onSelectImage(null)}
                     onFocusMap={onFocusMap}
+                    onLightbox={onLightbox}
                     goPrev={goPrev}
                     goNext={goNext}
                     hasPrev={hasPrev}
@@ -390,6 +443,7 @@ interface ExpandedItemProps {
   image: ImageRecord;
   onClose: () => void;
   onFocusMap: (id: string) => void;
+  onLightbox: (src: string) => void;
   goPrev: () => void;
   goNext: () => void;
   hasPrev: boolean;
@@ -405,62 +459,15 @@ const META_FIELDS: { key: keyof ImageRecord; label: string }[] = [
   { key: 'notes', label: 'Notes' },
 ];
 
-function ExpandedItem({ image, onClose, onFocusMap, goPrev, goNext, hasPrev, hasNext }: ExpandedItemProps) {
+function ExpandedItem({ image, onClose, onFocusMap, onLightbox, goPrev, goNext, hasPrev, hasNext }: ExpandedItemProps) {
   const [showGeo, setShowGeo] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // Zoom/pan state
-  const [scale, setScale] = useState(1);
-  const [translate, setTranslate] = useState({ x: 0, y: 0 });
-  const dragging = useRef(false);
-  const dragStart = useRef({ x: 0, y: 0 });
-  const translateStart = useRef({ x: 0, y: 0 });
-  const viewerRef = useRef<HTMLDivElement>(null);
-
-  // Reset zoom when image changes
   useEffect(() => {
-    setScale(1);
-    setTranslate({ x: 0, y: 0 });
     setShowGeo(false);
     setCopied(false);
   }, [image.id]);
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    setScale((s) => Math.min(6, Math.max(1, s - e.deltaY * 0.002)));
-  }, []);
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (scale <= 1) return;
-    e.preventDefault();
-    dragging.current = true;
-    dragStart.current = { x: e.clientX, y: e.clientY };
-    translateStart.current = { ...translate };
-  }, [scale, translate]);
-
-  useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      if (!dragging.current) return;
-      setTranslate({
-        x: translateStart.current.x + (e.clientX - dragStart.current.x),
-        y: translateStart.current.y + (e.clientY - dragStart.current.y),
-      });
-    };
-    const onUp = () => { dragging.current = false; };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-  }, []);
-
-  const handleDoubleClick = useCallback(() => {
-    setScale(1);
-    setTranslate({ x: 0, y: 0 });
-  }, []);
-
-  // Metadata original_jpg has wrong extension (.jpg) — actual files are .webp
   const originalUrl = `https://pub-76d24adcec7c46aaa6f0111002b5b9d0.r2.dev/originals/${image.id}.webp`;
   const imgSrc = showGeo && image.geo_webp ? image.geo_webp : originalUrl;
 
@@ -500,19 +507,13 @@ function ExpandedItem({ image, onClose, onFocusMap, goPrev, goNext, hasPrev, has
       <div className="expanded__content">
         <div
           className="expanded__viewer"
-          ref={viewerRef}
-          onWheel={handleWheel}
-          onMouseDown={handleMouseDown}
-          onDoubleClick={handleDoubleClick}
-          style={{ cursor: scale > 1 ? 'grab' : 'zoom-in' }}
+          onClick={() => onLightbox(imgSrc)}
+          style={{ cursor: 'pointer' }}
         >
           <img
             src={imgSrc}
             alt={displayName(image)}
             className="expanded__image"
-            style={{
-              transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})`,
-            }}
             draggable={false}
           />
         </div>
@@ -546,6 +547,3 @@ function ExpandedItem({ image, onClose, onFocusMap, goPrev, goNext, hasPrev, has
     </div>
   );
 }
-
-/* React import is auto-injected by the JSX transform, but Fragment needs it explicit in some configs */
-import React from 'react';
