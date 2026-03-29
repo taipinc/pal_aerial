@@ -1,0 +1,246 @@
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #0f0f0f;
+  --surface: #1a1a1a;
+  --border: #2a2a2a;
+  --text: #e0e0e0;
+  --text-muted: #888;
+  --accent: #c8a97e;
+
+  --handle-width: 6px;
+  --collapsed-width: 40px;
+  --header-height: 48px;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ── Archive shell ── */
+
+.archive {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+}
+
+.archive--loading,
+.archive--error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  width: 100vw;
+  color: var(--text-muted);
+  font-size: 1rem;
+}
+
+.archive--error {
+  color: #e06060;
+}
+
+/* ── Panes ── */
+
+.pane {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+}
+
+.pane__header {
+  height: var(--header-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.pane__title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.pane__body {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* Collapse button */
+
+.pane__collapse-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.pane__collapse-btn:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+/* Collapsed state */
+
+.pane--collapsed {
+  width: var(--collapsed-width) !important;
+  min-width: var(--collapsed-width);
+  max-width: var(--collapsed-width);
+  cursor: pointer;
+}
+
+.pane--collapsed .pane__header,
+.pane--collapsed .pane__body {
+  display: none;
+}
+
+.pane__collapsed-bar {
+  display: none;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.pane--collapsed .pane__collapsed-bar {
+  display: flex;
+}
+
+/* ── Drag handle ── */
+
+.drag-handle {
+  width: var(--handle-width);
+  cursor: col-resize;
+  background: var(--border);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
+  transition: background 0.15s;
+}
+
+.drag-handle:hover,
+.drag-handle--active {
+  background: var(--accent);
+}
+
+/* Prevent text selection while dragging */
+.archive--dragging {
+  user-select: none;
+  cursor: col-resize;
+}
+
+/* ── Map pane ── */
+
+.map-pane {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.map-pane__container {
+  width: 100%;
+  height: 100%;
+}
+
+.map-pane__controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(15, 15, 15, 0.85);
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  z-index: 5;
+}
+
+.map-pane__label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.map-pane__slider {
+  width: 100px;
+  height: 4px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* ── Mobile (<768px): stack vertically ── */
+
+@media (max-width: 767px) {
+  .archive {
+    flex-direction: column;
+  }
+
+  .pane {
+    width: 100% !important;
+    min-width: 100%;
+    max-width: 100%;
+  }
+
+  .pane--collapsed {
+    width: 100% !important;
+    min-width: 100%;
+    max-width: 100%;
+    height: var(--collapsed-width) !important;
+  }
+
+  .pane--collapsed .pane__collapsed-bar {
+    writing-mode: horizontal-tb;
+    text-orientation: initial;
+    height: 100%;
+    flex-direction: row;
+  }
+
+  .drag-handle {
+    display: none;
+  }
+
+  .pane:not(.pane--collapsed) {
+    flex: 1;
+  }
+}
