@@ -1,43 +1,64 @@
-# Astro Starter Kit: Minimal
+# PAL AERIAL — Archive Explorer
 
-```sh
-npm create astro@latest -- --template minimal
-```
+A static online archive of ~700 scanned aerial photographs of Palestine from the 1940s.
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
+## Stack
 
-## 🚀 Project Structure
+- **Astro** — static site framework
+- **React** — interactive islands (two-pane UI)
+- **MapLibre GL JS** — map with georeferenced image overlays
+- **Plain CSS** — CSS custom properties, no framework
+- **Cloudflare Pages** — hosting
+- **Cloudflare R2** — image and metadata storage
 
-Inside of your Astro project, you'll see the following folders and files:
+## Project Structure
 
 ```text
 /
 ├── public/
 ├── src/
-│   └── pages/
-│       └── index.astro
+│   ├── components/
+│   │   ├── Archive.tsx        — main layout: map pane + collection pane
+│   │   ├── MapPane.tsx        — MapLibre map with image overlays
+│   │   ├── CollectionPane.tsx — grid/table view with filtering and sorting
+│   │   └── AboutPane.tsx      — renders about.md content
+│   ├── content/
+│   │   └── about.md           — about page content (editable)
+│   ├── pages/
+│   │   └── index.astro
+│   └── styles/
+│       └── global.css
 └── package.json
 ```
 
-Astro looks for `.astro` or `.md` files in the `src/pages/` directory. Each page is exposed as a route based on its file name.
+## Data
 
-There's nothing special about `src/components/`, but that's where we like to put any Astro/React/Vue/Svelte/Preact components.
+`metadata.json` is fetched from R2 at startup. Each record:
 
-Any static assets, like images, can be placed in the `public/` directory.
+```json
+{
+  "id": "PAL_AERIAL_0001",
+  "place_name_original": "...",
+  "place_name_current": "...",
+  "date": "1948-04-16",
+  "flight_id": "...",
+  "notes": "...",
+  "is_georeferenced": true,
+  "bounds": [W, S, E, N],
+  "display_webp": "...",
+  "geo_webp": "...",
+  "thumb_jpg": "..."
+}
+```
 
-## 🧞 Commands
+- `bounds` is WGS84 `[W, S, E, N]`, null if not georeferenced
+- ~150 georeferenced images, ~700 total
 
-All commands are run from the root of the project, from a terminal:
+## Commands
 
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `npm install`             | Installs dependencies                            |
-| `npm run dev`             | Starts local dev server at `localhost:4321`      |
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
-
-## 👀 Want to learn more?
-
-Feel free to check [our documentation](https://docs.astro.build) or jump into our [Discord server](https://astro.build/chat).
+| Command             | Action                                      |
+| :------------------ | :------------------------------------------ |
+| `npm install`       | Installs dependencies                       |
+| `npm run dev`       | Starts local dev server at `localhost:4321` |
+| `npm run build`     | Build production site to `./dist/`          |
+| `npm run preview`   | Preview build locally                       |
