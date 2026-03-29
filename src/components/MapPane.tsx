@@ -49,8 +49,6 @@ const OVERLAY_SOURCE = 'selected-overlay';
 const OVERLAY_LAYER = 'selected-overlay-layer';
 const DEFAULT_OPACITY = 1.0;
 
-const FOOTPRINT_COLOR = '#7a9cbf';
-
 export default function MapPane({ images, footprints, selectedId, onSelectImage, focusTrigger }: MapPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -60,6 +58,8 @@ export default function MapPane({ images, footprints, selectedId, onSelectImage,
   const [mapReady, setMapReady] = useState(false);
   const [basemap, setBasemap] = useState<BasemapKey>('light');
   const [footprintsVisible, setFootprintsVisible] = useState(true);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const onSelectRef = useRef(onSelectImage);
   onSelectRef.current = onSelectImage;
@@ -67,25 +67,37 @@ export default function MapPane({ images, footprints, selectedId, onSelectImage,
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
 
+  const showToast = useCallback((msg: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast(msg);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3000);
+  }, []);
+
   // Add footprint layers to map
   const addFootprintLayers = useCallback((map: maplibregl.Map) => {
     if (map.getSource(FOOTPRINTS_SOURCE)) return;
 
+    // Read color from CSS custom property
+    const footprintColor = getComputedStyle(document.documentElement)
+      .getPropertyValue('--footprint-color').trim() || '#c8a97e';
+
     map.addSource(FOOTPRINTS_SOURCE, {
       type: 'geojson',
       data: footprints,
+      generateId: true,
     });
 
     const sel = selectedIdRef.current ?? '';
 
+    // Invisible fill — keeps the polygon clickable
     map.addLayer({
       id: FOOTPRINTS_FILL,
       type: 'fill',
       source: FOOTPRINTS_SOURCE,
       filter: sel ? ['!=', ['get', 'id'], sel] : ['literal', true],
       paint: {
-        'fill-color': FOOTPRINT_COLOR,
-        'fill-opacity': 0.15,
+        'fill-color': footprintColor,
+        'fill-opacity': 0,
       },
     });
 
@@ -95,7 +107,7 @@ export default function MapPane({ images, footprints, selectedId, onSelectImage,
       source: FOOTPRINTS_SOURCE,
       filter: sel ? ['!=', ['get', 'id'], sel] : ['literal', true],
       paint: {
-        'line-color': FOOTPRINT_COLOR,
+        'line-color': footprintColor,
         'line-width': 1.5,
         'line-opacity': 0.7,
       },
@@ -221,6 +233,11 @@ export default function MapPane({ images, footprints, selectedId, onSelectImage,
       coordinates: [[W, N], [E, N], [E, S], [W, S]],
     });
 
+    // Toast if image fails to load as map overlay
+    map.once('error', () => {
+      showToast('Image could not be loaded on map');
+    });
+
     // Add overlay BELOW footprints so footprints stay on top
     map.addLayer(
       {
@@ -307,6 +324,7 @@ export default function MapPane({ images, footprints, selectedId, onSelectImage,
           </button>
         ))}
       </div>
+      {toast && <div key={toast} className="map-toast">{toast}</div>}
     </div>
   );
 }

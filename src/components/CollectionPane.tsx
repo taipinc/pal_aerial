@@ -48,7 +48,6 @@ export default function CollectionPane({ images, selectedId, onSelectImage, onFo
     if (!selectedId) return;
     const container = scrollRef.current;
     if (!container) return;
-    // Two attempts: one rAF for quick renders, one timeout for grid reflow
     let raf: number;
     let timer: ReturnType<typeof setTimeout>;
     const scrollToExpanded = () => {
@@ -58,14 +57,12 @@ export default function CollectionPane({ images, selectedId, onSelectImage, onFo
       const elRect = el.getBoundingClientRect();
       const elFits = elRect.height <= containerRect.height;
       if (elFits) {
-        // Can show it entirely — scroll so bottom is visible with padding
         if (elRect.bottom > containerRect.bottom) {
           container.scrollBy({ top: elRect.bottom - containerRect.bottom + 12, behavior: 'smooth' });
         } else if (elRect.top < containerRect.top) {
           container.scrollBy({ top: elRect.top - containerRect.top - 12, behavior: 'smooth' });
         }
       } else {
-        // Taller than container — align top of expanded to top of container
         if (elRect.top < containerRect.top || elRect.top > containerRect.bottom) {
           container.scrollBy({ top: elRect.top - containerRect.top - 12, behavior: 'smooth' });
         }
@@ -204,16 +201,18 @@ export default function CollectionPane({ images, selectedId, onSelectImage, onFo
               </button>
             ))}
           </div>
-          <select
-            className="collection__flight-select"
-            value={flightFilter}
-            onChange={(e) => setFlightFilter(e.target.value)}
-          >
-            <option value="">All flights</option>
-            {flightIds.map((fid) => (
-              <option key={fid} value={fid}>{fid}</option>
-            ))}
-          </select>
+          {flightIds.length > 0 && (
+            <select
+              className="collection__flight-select"
+              value={flightFilter}
+              onChange={(e) => setFlightFilter(e.target.value)}
+            >
+              <option value="">All flights</option>
+              {flightIds.map((fid) => (
+                <option key={fid} value={fid}>{fid}</option>
+              ))}
+            </select>
+          )}
           {isFiltered && (
             <button className="collection__clear-btn" onClick={clearFilters}>
               Clear
@@ -230,8 +229,17 @@ export default function CollectionPane({ images, selectedId, onSelectImage, onFo
       </div>
 
       {/* Content */}
-      <div className="collection__body" ref={scrollRef}>
-        {viewMode === 'grid' ? (
+      <div className="collection__body" ref={scrollRef} onClick={() => onSelectImage(null)}>
+        {sorted.length === 0 ? (
+          <div className="collection__empty" onClick={(e) => e.stopPropagation()}>
+            <span>No images match your filters.</span>
+            {isFiltered && (
+              <button className="collection__empty-btn" onClick={clearFilters}>
+                Clear filters
+              </button>
+            )}
+          </div>
+        ) : viewMode === 'grid' ? (
           <GridView
             images={sorted}
             selectedId={selectedId}
@@ -289,16 +297,28 @@ interface GridViewProps {
   hasNext: boolean;
 }
 
+const CARD_HEIGHT_ESTIMATE = 200; // px including gap, used before measurement
+const SCROLL_BUFFER = 500; // px above/below viewport to keep rendered
+
 function GridView({ images, selectedId, selectedImage, onSelectImage, onFocusMap, onLightbox, goPrev, goNext, hasPrev, hasNext }: GridViewProps) {
   const gridRef = useRef<HTMLDivElement>(null);
   const [colCount, setColCount] = useState(5);
+  const [cardHeight, setCardHeight] = useState(CARD_HEIGHT_ESTIMATE);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [containerH, setContainerH] = useState(600);
 
+  // Measure columns and card height
   useEffect(() => {
     const el = gridRef.current;
     if (!el) return;
     const measure = () => {
       const cols = getComputedStyle(el).gridTemplateColumns.split(' ').length;
       setColCount(cols);
+      const card = el.querySelector<HTMLElement>('.grid-card');
+      if (card) {
+        const h = card.getBoundingClientRect().height;
+        if (h > 10) setCardHeight(h + 8); // +8 for gap
+      }
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -306,46 +326,100 @@ function GridView({ images, selectedId, selectedImage, onSelectImage, onFocusMap
     return () => ro.disconnect();
   }, []);
 
-  const selectedIndex = selectedId ? images.findIndex((img) => img.id === selectedId) : -1;
-  const insertAfterIndex = selectedIndex >= 0
-    ? Math.min(Math.floor(selectedIndex / colCount) * colCount + colCount - 1, images.length - 1)
+  // Track scroll position on parent container
+  useEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const scrollEl = grid.parentElement;
+    if (!scrollEl) return;
+
+    const onScroll = () => setScrollTop(scrollEl.scrollTop);
+    const ro = new ResizeObserver(() => {
+      setContainerH(scrollEl.clientHeight);
+      setScrollTop(scrollEl.scrollTop);
+    });
+
+    scrollEl.addEventListener('scroll', onScroll, { passive: true });
+    ro.observe(scrollEl);
+    setContainerH(scrollEl.clientHeight);
+
+    return () => {
+      scrollEl.removeEventListener('scroll', onScroll);
+      ro.disconnect();
+    };
+  }, []);
+
+  // Compute visible window
+  const rowCount = Math.ceil(images.length / colCount);
+  const firstRow = Math.max(0, Math.floor((scrollTop - SCROLL_BUFFER) / cardHeight));
+  const lastRow = Math.min(rowCount - 1, Math.ceil((scrollTop + containerH + SCROLL_BUFFER) / cardHeight));
+
+  // Always include the selected item's row so the expanded panel renders
+  const selectedGlobalIdx = selectedId ? images.findIndex((img) => img.id === selectedId) : -1;
+  const selectedRow = selectedGlobalIdx >= 0 ? Math.floor(selectedGlobalIdx / colCount) : -1;
+
+  const effectiveFirstRow = selectedRow >= 0 ? Math.min(firstRow, selectedRow) : firstRow;
+  const effectiveLastRow = selectedRow >= 0 ? Math.max(lastRow, selectedRow + 1) : lastRow;
+
+  const startIdx = effectiveFirstRow * colCount;
+  const endIdx = Math.min(images.length, (effectiveLastRow + 1) * colCount);
+  const topSpacerH = effectiveFirstRow * cardHeight;
+  const bottomSpacerH = Math.max(0, rowCount - effectiveLastRow - 1) * cardHeight;
+
+  // Last global index in the selected row — expanded panel inserts after this
+  const globalInsertAfterIdx = selectedGlobalIdx >= 0
+    ? Math.min(Math.floor(selectedGlobalIdx / colCount) * colCount + colCount - 1, images.length - 1)
     : -1;
 
   return (
     <div className="grid-view" ref={gridRef}>
-      {images.map((img, i) => (
-        <React.Fragment key={img.id}>
-          <div
-            className={`grid-card${img.id === selectedId ? ' grid-card--selected' : ''}`}
-            onClick={() => onSelectImage(img.id)}
-          >
-            <div className="grid-card__thumb-wrap">
-              {img.thumb_jpg ? (
-                <img src={img.thumb_jpg} alt={displayName(img)} className="grid-card__thumb" loading="lazy" />
-              ) : (
-                <div className="grid-card__placeholder" />
-              )}
-              {img.is_georeferenced && <span className="grid-card__badge">GEO</span>}
+      {topSpacerH > 0 && (
+        <div style={{ gridColumn: '1 / -1', height: `${topSpacerH}px` }} aria-hidden="true" />
+      )}
+      {images.slice(startIdx, endIdx).map((img, localI) => {
+        const globalI = startIdx + localI;
+        return (
+          <React.Fragment key={img.id}>
+            <div
+              className={`grid-card${img.id === selectedId ? ' grid-card--selected' : ''}`}
+              onClick={(e) => { e.stopPropagation(); onSelectImage(img.id); }}
+            >
+              <div className="grid-card__thumb-wrap">
+                {img.thumb_jpg ? (
+                  <img
+                    src={img.thumb_jpg}
+                    alt={displayName(img)}
+                    className="grid-card__thumb"
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="grid-card__placeholder">{img.id}</div>
+                )}
+                {img.is_georeferenced && <span className="grid-card__badge">GEO</span>}
+              </div>
+              <div className="grid-card__info">
+                <span className="grid-card__name">{displayName(img)}</span>
+                {img.date && <span className="grid-card__date">{img.date}</span>}
+              </div>
             </div>
-            <div className="grid-card__info">
-              <span className="grid-card__name">{displayName(img)}</span>
-              {img.date && <span className="grid-card__date">{img.date}</span>}
-            </div>
-          </div>
-          {i === insertAfterIndex && selectedImage && (
-            <ExpandedItem
-              image={selectedImage}
-              onClose={() => onSelectImage(null)}
-              onFocusMap={onFocusMap}
-              onLightbox={onLightbox}
-              goPrev={goPrev}
-              goNext={goNext}
-              hasPrev={hasPrev}
-              hasNext={hasNext}
-            />
-          )}
-        </React.Fragment>
-      ))}
+            {globalI === globalInsertAfterIdx && selectedImage && (
+              <ExpandedItem
+                image={selectedImage}
+                onClose={() => onSelectImage(null)}
+                onFocusMap={onFocusMap}
+                onLightbox={onLightbox}
+                goPrev={goPrev}
+                goNext={goNext}
+                hasPrev={hasPrev}
+                hasNext={hasNext}
+              />
+            )}
+          </React.Fragment>
+        );
+      })}
+      {bottomSpacerH > 0 && (
+        <div style={{ gridColumn: '1 / -1', height: `${bottomSpacerH}px` }} aria-hidden="true" />
+      )}
     </div>
   );
 }
@@ -400,7 +474,7 @@ function TableView({ images, selectedId, selectedImage, onSelectImage, onFocusMa
           <React.Fragment key={img.id}>
             <tr
               className={`table-view__row${img.id === selectedId ? ' table-view__row--selected' : ''}`}
-              onClick={() => onSelectImage(img.id)}
+              onClick={(e) => { e.stopPropagation(); onSelectImage(img.id); }}
             >
               <td className="table-view__td table-view__td--thumb">
                 {img.thumb_jpg ? (
@@ -415,7 +489,7 @@ function TableView({ images, selectedId, selectedImage, onSelectImage, onFocusMa
               <td className="table-view__td">{img.is_georeferenced ? '✓' : ''}</td>
             </tr>
             {img.id === selectedId && selectedImage && (
-              <tr className="table-view__expanded-row">
+              <tr className="table-view__expanded-row" onClick={(e) => e.stopPropagation()}>
                 <td colSpan={5}>
                   <ExpandedItem
                     image={selectedImage}
@@ -462,14 +536,81 @@ const META_FIELDS: { key: keyof ImageRecord; label: string }[] = [
 function ExpandedItem({ image, onClose, onFocusMap, onLightbox, goPrev, goNext, hasPrev, hasNext }: ExpandedItemProps) {
   const [showGeo, setShowGeo] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [imgError, setImgError] = useState(false);
+
+  // Touch/pointer zoom+pan state
+  const imgRef = useRef<HTMLImageElement>(null);
+  const transformRef = useRef({ scale: 1, x: 0, y: 0 });
+  const activePointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const lastPinchDistRef = useRef(0);
+  const hasDraggedRef = useRef(false);
 
   useEffect(() => {
     setShowGeo(false);
     setCopied(false);
+    setImgError(false);
+    transformRef.current = { scale: 1, x: 0, y: 0 };
+    if (imgRef.current) imgRef.current.style.transform = '';
+    activePointersRef.current.clear();
   }, [image.id]);
+
+  const applyTransform = useCallback((scale: number, x: number, y: number) => {
+    transformRef.current = { scale, x, y };
+    if (imgRef.current) {
+      imgRef.current.style.transform = (scale === 1 && x === 0 && y === 0)
+        ? ''
+        : `translate(${x}px, ${y}px) scale(${scale})`;
+    }
+  }, []);
+
+  const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    hasDraggedRef.current = false;
+    if (activePointersRef.current.size === 2) {
+      const [p1, p2] = [...activePointersRef.current.values()];
+      lastPinchDistRef.current = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    }
+  }, []);
+
+  const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const prev = activePointersRef.current.get(e.pointerId);
+    if (!prev) return;
+
+    const dx = e.clientX - prev.x;
+    const dy = e.clientY - prev.y;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) hasDraggedRef.current = true;
+
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const { scale, x, y } = transformRef.current;
+
+    if (activePointersRef.current.size === 1) {
+      if (scale > 1) applyTransform(scale, x + dx, y + dy);
+    } else if (activePointersRef.current.size === 2) {
+      const [p1, p2] = [...activePointersRef.current.values()];
+      const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      if (lastPinchDistRef.current > 0) {
+        const ratio = dist / lastPinchDistRef.current;
+        const newScale = Math.min(5, Math.max(1, scale * ratio));
+        applyTransform(newScale, x, y);
+      }
+      lastPinchDistRef.current = dist;
+    }
+  }, [applyTransform]);
+
+  const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    activePointersRef.current.delete(e.pointerId);
+    if (activePointersRef.current.size < 2) lastPinchDistRef.current = 0;
+    const { scale } = transformRef.current;
+    if (scale <= 1) applyTransform(1, 0, 0);
+  }, [applyTransform]);
 
   const originalUrl = `https://pub-76d24adcec7c46aaa6f0111002b5b9d0.r2.dev/originals/${image.id}.webp`;
   const imgSrc = showGeo && image.geo_webp ? image.geo_webp : originalUrl;
+
+  const onViewerClick = useCallback(() => {
+    if (!hasDraggedRef.current && !imgError) onLightbox(imgSrc);
+  }, [imgSrc, onLightbox, imgError]);
 
   const copyPermalink = useCallback(() => {
     const url = `${window.location.origin}${window.location.pathname}?id=${image.id}`;
@@ -507,15 +648,25 @@ function ExpandedItem({ image, onClose, onFocusMap, onLightbox, goPrev, goNext, 
       <div className="expanded__content">
         <div
           className="expanded__viewer"
-          onClick={() => onLightbox(imgSrc)}
-          style={{ cursor: 'pointer' }}
+          onClick={onViewerClick}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          style={{ touchAction: 'none' }}
         >
-          <img
-            src={imgSrc}
-            alt={displayName(image)}
-            className="expanded__image"
-            draggable={false}
-          />
+          {imgError ? (
+            <div className="expanded__img-placeholder">Image not available</div>
+          ) : (
+            <img
+              ref={imgRef}
+              src={imgSrc}
+              alt={displayName(image)}
+              className="expanded__image"
+              draggable={false}
+              onError={() => setImgError(true)}
+            />
+          )}
         </div>
 
         <div className="expanded__meta">

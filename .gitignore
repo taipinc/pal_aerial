@@ -17,6 +17,10 @@ pnpm-debug.log*
 .env
 .env.production
 
+# large local source directories — not for git
+processed/
+RENAME/
+
 # macOS-specific files
 .DS_Store
 

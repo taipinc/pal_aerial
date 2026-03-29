@@ -14,6 +14,7 @@
   --text-muted: #777;
   --accent: #c8a97e;
   --georef: #2e8b57;
+  --footprint-color: #c8a97e;
 
   --handle-width: 6px;
   --collapsed-width: 40px;
@@ -91,6 +92,13 @@ html, body {
   font-size: 0.9rem;
 }
 
+.pane__loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* Collapse button */
 
 .pane__collapse-btn {
@@ -145,6 +153,21 @@ html, body {
 
 .pane--collapsed .pane__collapsed-bar {
   display: flex;
+}
+
+/* ── Spinner ── */
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 /* ── Drag handle ── */
@@ -270,6 +293,29 @@ html, body {
   font-weight: 600;
 }
 
+/* Map toast */
+
+.map-toast {
+  position: absolute;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  z-index: 10;
+  pointer-events: none;
+  animation: toast-fade 3s ease forwards;
+}
+
+@keyframes toast-fade {
+  0%, 70% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 /* ── Collection pane ── */
 
 .collection {
@@ -278,6 +324,7 @@ html, body {
   flex-direction: column;
   overflow: hidden;
   position: relative;
+  min-height: 0;
 }
 
 .collection__filters {
@@ -410,6 +457,36 @@ html, body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  min-height: 0;
+}
+
+/* Empty state */
+
+.collection__empty {
+  padding: 48px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.collection__empty-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--accent);
+  padding: 6px 18px;
+  font-size: 0.8rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.collection__empty-btn:hover {
+  background: var(--border);
 }
 
 /* ── Grid view ── */
@@ -443,7 +520,7 @@ html, body {
 .grid-card__thumb-wrap {
   position: relative;
   aspect-ratio: 4 / 3;
-  background: #eee;
+  background: #1e1e1e;
   overflow: hidden;
 }
 
@@ -457,7 +534,17 @@ html, body {
 .grid-card__placeholder {
   width: 100%;
   height: 100%;
-  background: #ddd;
+  background: #1e1e1e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #555;
+  font-size: 0.6rem;
+  font-family: monospace;
+  letter-spacing: 0.03em;
+  text-align: center;
+  padding: 4px;
+  word-break: break-all;
 }
 
 .grid-card__badge {
@@ -572,7 +659,7 @@ html, body {
 .table-view__thumb-placeholder {
   width: 52px;
   height: 38px;
-  background: #ddd;
+  background: #1e1e1e;
   border-radius: 3px;
 }
 
@@ -673,12 +760,13 @@ html, body {
   min-width: 0;
   overflow: hidden;
   border-radius: 4px;
-  background: #f0f0f0;
+  background: #1e1e1e;
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
   cursor: pointer;
+  user-select: none;
 }
 
 .expanded__image {
@@ -686,8 +774,18 @@ html, body {
   max-height: 100%;
   object-fit: contain;
   transform-origin: center center;
-  transition: transform 0.05s linear;
   user-select: none;
+  pointer-events: none;
+}
+
+.expanded__img-placeholder {
+  width: 100%;
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #555;
+  font-size: 0.8rem;
 }
 
 .expanded__meta {
@@ -777,6 +875,7 @@ html, body {
     width: 100% !important;
     min-width: 100%;
     max-width: 100%;
+    height: auto;
   }
 
   .pane--collapsed {
@@ -784,6 +883,7 @@ html, body {
     min-width: 100%;
     max-width: 100%;
     height: var(--collapsed-width) !important;
+    flex: none;
   }
 
   .pane--collapsed .pane__collapsed-bar {
@@ -799,5 +899,29 @@ html, body {
 
   .pane:not(.pane--collapsed) {
     flex: 1;
+    min-height: 0;
+  }
+
+  .map-pane {
+    min-height: 0;
+  }
+
+  .collection {
+    min-height: 0;
+  }
+
+  .expanded__content {
+    flex-direction: column;
+    max-height: none;
+    overflow-y: auto;
+  }
+
+  .expanded__meta {
+    width: 100%;
+    overflow-y: unset;
+  }
+
+  .expanded__viewer {
+    min-height: 180px;
   }
 }

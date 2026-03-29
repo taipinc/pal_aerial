@@ -128,7 +128,19 @@ export default function Archive() {
     return <div className="archive--error">Failed to load archive: {error}</div>;
   }
   if (!images || !footprints) {
-    return <div className="archive--loading">Loading archive…</div>;
+    return (
+      <div className="archive">
+        <div className="pane" style={{ width: '50%' }}>
+          <div className="pane__header"><span className="pane__title">Map</span></div>
+          <div className="pane__loading"><div className="spinner" /></div>
+        </div>
+        <div className="drag-handle" style={{ pointerEvents: 'none' }} />
+        <div className="pane" style={{ width: '50%' }}>
+          <div className="pane__header"><span className="pane__title">Collection</span></div>
+          <div className="pane__loading"><div className="spinner" /></div>
+        </div>
+      </div>
+    );
   }
 
   return (
