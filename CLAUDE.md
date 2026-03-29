@@ -1,5 +1,6 @@
 # PAL_AERIAL Archive — Project Context
 
+
 ## What this is
 A static online archive of ~700 scanned aerial photographs (Palestine, 1940s).
 No backend. No database. No auth. Everything is static.
