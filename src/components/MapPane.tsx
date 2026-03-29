@@ -14,6 +14,7 @@ interface MapPaneProps {
   images: ImageRecord[];
   selectedId: string | null;
   onSelectImage: (id: string) => void;
+  focusTrigger: number;
 }
 
 const STYLE_URL = 'https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json';
@@ -23,7 +24,7 @@ const OVERLAY_SOURCE = 'selected-overlay';
 const OVERLAY_LAYER = 'selected-overlay-layer';
 const DEFAULT_OPACITY = 0.85;
 
-export default function MapPane({ images, selectedId, onSelectImage }: MapPaneProps) {
+export default function MapPane({ images, selectedId, onSelectImage, focusTrigger }: MapPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const loadedOverlayRef = useRef<string | null>(null);
@@ -184,6 +185,17 @@ export default function MapPane({ images, selectedId, onSelectImage }: MapPanePr
       duration: 1200,
     });
   }, [selectedId, mapReady, images]);
+
+  // Re-fly to selected image when focusTrigger fires
+  useEffect(() => {
+    if (!focusTrigger) return;
+    const map = mapRef.current;
+    if (!map || !mapReady || !selectedId) return;
+    const img = images.find((i) => i.id === selectedId);
+    if (!img?.bounds) return;
+    const [W, S, E, N] = img.bounds;
+    map.fitBounds([[W, S], [E, N]], { padding: 60, duration: 1200 });
+  }, [focusTrigger, mapReady]);
 
   // Update overlay opacity when slider changes
   useEffect(() => {

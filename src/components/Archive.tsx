@@ -14,7 +14,7 @@ export interface ImageRecord {
   id: string;
   is_georeferenced: boolean;
   bounds: [number, number, number, number] | null;
-  display_webp: string;
+  original_jpg: string;
   geo_webp?: string;
   thumb_jpg: string;
   place_name_original: string;
@@ -25,15 +25,21 @@ export interface ImageRecord {
   [key: string]: unknown;
 }
 
+function readUrlParam(key: string): string | null {
+  if (typeof window === 'undefined') return null;
+  return new URLSearchParams(window.location.search).get(key);
+}
+
 export default function Archive() {
   const [images, setImages] = useState<ImageRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => readUrlParam('id'));
   const [splitPct, setSplitPct] = useState(50);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [focusTrigger, setFocusTrigger] = useState(0);
 
   const prevSplitRef = useRef(50);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -47,10 +53,22 @@ export default function Archive() {
       })
       .then((data: ImageRecord[]) => {
         setImages(data);
-        console.log(`Loaded ${data.length} images from metadata.json`);
       })
       .catch((err) => setError(err.message));
   }, []);
+
+  // Sync selectedId to URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (selectedId) {
+      params.set('id', selectedId);
+    } else {
+      params.delete('id');
+    }
+    const qs = params.toString();
+    const url = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+    history.replaceState(null, '', url);
+  }, [selectedId]);
 
   // Drag handling
   const onMouseDown = useCallback(() => {
@@ -95,9 +113,13 @@ export default function Archive() {
     });
   }, []);
 
-  const handleSelectImage = useCallback((id: string) => {
-    setSelectedId((prev) => (prev === id ? null : id));
-    console.log(`Selected image: ${id}`);
+  const handleSelectImage = useCallback((id: string | null) => {
+    setSelectedId((prev) => (id !== null && prev === id ? null : id));
+  }, []);
+
+  const handleFocusMap = useCallback((id: string) => {
+    setSelectedId(id);
+    setFocusTrigger((n) => n + 1);
   }, []);
 
   // Loading / error states
@@ -107,8 +129,6 @@ export default function Archive() {
   if (!images) {
     return <div className="archive--loading">Loading archive…</div>;
   }
-
-  const imageCount = images.length;
 
   return (
     <div
@@ -142,6 +162,7 @@ export default function Archive() {
           images={images}
           selectedId={selectedId}
           onSelectImage={handleSelectImage}
+          focusTrigger={focusTrigger}
         />
       </div>
 
@@ -176,7 +197,12 @@ export default function Archive() {
             ▶
           </button>
         </div>
-        <CollectionPane imageCount={imageCount} />
+        <CollectionPane
+          images={images}
+          selectedId={selectedId}
+          onSelectImage={handleSelectImage}
+          onFocusMap={handleFocusMap}
+        />
       </div>
     </div>
   );
