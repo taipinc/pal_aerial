@@ -41,38 +41,6 @@ export default function CollectionPane({ images, selectedId, onSelectImage, onFo
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll to expanded item when selectedId changes
-  useEffect(() => {
-    if (!selectedId) return;
-    const container = scrollRef.current;
-    if (!container) return;
-    let raf: number;
-    let timer: ReturnType<typeof setTimeout>;
-    const scrollToExpanded = () => {
-      const el = container.querySelector('.expanded') as HTMLElement | null;
-      if (!el) return;
-      const containerRect = container.getBoundingClientRect();
-      const elRect = el.getBoundingClientRect();
-      const elFits = elRect.height <= containerRect.height;
-      if (elFits) {
-        if (elRect.bottom > containerRect.bottom) {
-          container.scrollBy({ top: elRect.bottom - containerRect.bottom + 12, behavior: 'smooth' });
-        } else if (elRect.top < containerRect.top) {
-          container.scrollBy({ top: elRect.top - containerRect.top - 12, behavior: 'smooth' });
-        }
-      } else {
-        if (elRect.top < containerRect.top || elRect.top > containerRect.bottom) {
-          container.scrollBy({ top: elRect.top - containerRect.top - 12, behavior: 'smooth' });
-        }
-      }
-    };
-    raf = requestAnimationFrame(scrollToExpanded);
-    timer = setTimeout(scrollToExpanded, 100);
-    return () => { cancelAnimationFrame(raf); clearTimeout(timer); };
-  }, [selectedId]);
-
   // Debounce search
   useEffect(() => {
     const t = setTimeout(() => setSearchQuery(searchRaw), 200);
@@ -160,6 +128,18 @@ export default function CollectionPane({ images, selectedId, onSelectImage, onFo
     return () => window.removeEventListener('keydown', onKey);
   }, [lightboxSrc]);
 
+  // Keyboard nav for expanded panel (disabled when lightbox is open)
+  useEffect(() => {
+    if (!selectedImage || lightboxSrc) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onSelectImage(null);
+      else if (e.key === 'ArrowLeft') goPrev();
+      else if (e.key === 'ArrowRight') goNext();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedImage, lightboxSrc, goPrev, goNext, onSelectImage]);
+
   return (
     <div className="collection">
       {/* Filter bar */}
@@ -229,7 +209,7 @@ export default function CollectionPane({ images, selectedId, onSelectImage, onFo
       </div>
 
       {/* Content */}
-      <div className="collection__body" ref={scrollRef} onClick={() => onSelectImage(null)}>
+      <div className="collection__body" onClick={() => onSelectImage(null)}>
         {sorted.length === 0 ? (
           <div className="collection__empty" onClick={(e) => e.stopPropagation()}>
             <span>No images match your filters.</span>
@@ -243,33 +223,35 @@ export default function CollectionPane({ images, selectedId, onSelectImage, onFo
           <GridView
             images={sorted}
             selectedId={selectedId}
-            selectedImage={selectedImage}
             onSelectImage={onSelectImage}
-            onFocusMap={onFocusMap}
-            onLightbox={setLightboxSrc}
-            goPrev={goPrev}
-            goNext={goNext}
-            hasPrev={selectedIndex > 0}
-            hasNext={selectedIndex < sorted.length - 1}
           />
         ) : (
           <TableView
             images={sorted}
             selectedId={selectedId}
-            selectedImage={selectedImage}
             onSelectImage={onSelectImage}
-            onFocusMap={onFocusMap}
-            onLightbox={setLightboxSrc}
             sortKey={sortKey}
             sortDir={sortDir}
             onSort={handleSort}
+          />
+        )}
+      </div>
+
+      {/* Expanded item panel */}
+      {selectedImage && (
+        <div className="collection__expanded-panel" onClick={(e) => e.stopPropagation()}>
+          <ExpandedItem
+            image={selectedImage}
+            onClose={() => onSelectImage(null)}
+            onFocusMap={onFocusMap}
+            onLightbox={setLightboxSrc}
             goPrev={goPrev}
             goNext={goNext}
             hasPrev={selectedIndex > 0}
             hasNext={selectedIndex < sorted.length - 1}
           />
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Lightbox */}
       {lightboxSrc && (
@@ -287,20 +269,13 @@ export default function CollectionPane({ images, selectedId, onSelectImage, onFo
 interface GridViewProps {
   images: ImageRecord[];
   selectedId: string | null;
-  selectedImage: ImageRecord | null | undefined;
   onSelectImage: (id: string | null) => void;
-  onFocusMap: (id: string) => void;
-  onLightbox: (src: string) => void;
-  goPrev: () => void;
-  goNext: () => void;
-  hasPrev: boolean;
-  hasNext: boolean;
 }
 
 const CARD_HEIGHT_ESTIMATE = 200; // px including gap, used before measurement
 const SCROLL_BUFFER = 500; // px above/below viewport to keep rendered
 
-function GridView({ images, selectedId, selectedImage, onSelectImage, onFocusMap, onLightbox, goPrev, goNext, hasPrev, hasNext }: GridViewProps) {
+function GridView({ images, selectedId, onSelectImage }: GridViewProps) {
   const gridRef = useRef<HTMLDivElement>(null);
   const [colCount, setColCount] = useState(5);
   const [cardHeight, setCardHeight] = useState(CARD_HEIGHT_ESTIMATE);
@@ -354,69 +329,41 @@ function GridView({ images, selectedId, selectedImage, onSelectImage, onFocusMap
   const firstRow = Math.max(0, Math.floor((scrollTop - SCROLL_BUFFER) / cardHeight));
   const lastRow = Math.min(rowCount - 1, Math.ceil((scrollTop + containerH + SCROLL_BUFFER) / cardHeight));
 
-  // Always include the selected item's row so the expanded panel renders
-  const selectedGlobalIdx = selectedId ? images.findIndex((img) => img.id === selectedId) : -1;
-  const selectedRow = selectedGlobalIdx >= 0 ? Math.floor(selectedGlobalIdx / colCount) : -1;
-
-  const effectiveFirstRow = selectedRow >= 0 ? Math.min(firstRow, selectedRow) : firstRow;
-  const effectiveLastRow = selectedRow >= 0 ? Math.max(lastRow, selectedRow + 1) : lastRow;
-
-  const startIdx = effectiveFirstRow * colCount;
-  const endIdx = Math.min(images.length, (effectiveLastRow + 1) * colCount);
-  const topSpacerH = effectiveFirstRow * cardHeight;
-  const bottomSpacerH = Math.max(0, rowCount - effectiveLastRow - 1) * cardHeight;
-
-  // Last global index in the selected row — expanded panel inserts after this
-  const globalInsertAfterIdx = selectedGlobalIdx >= 0
-    ? Math.min(Math.floor(selectedGlobalIdx / colCount) * colCount + colCount - 1, images.length - 1)
-    : -1;
+  const startIdx = firstRow * colCount;
+  const endIdx = Math.min(images.length, (lastRow + 1) * colCount);
+  const topSpacerH = firstRow * cardHeight;
+  const bottomSpacerH = Math.max(0, rowCount - lastRow - 1) * cardHeight;
 
   return (
     <div className="grid-view" ref={gridRef}>
       {topSpacerH > 0 && (
         <div style={{ gridColumn: '1 / -1', height: `${topSpacerH}px` }} aria-hidden="true" />
       )}
-      {images.slice(startIdx, endIdx).map((img, localI) => {
-        const globalI = startIdx + localI;
-        return (
-          <React.Fragment key={img.id}>
-            <div
-              className={`grid-card${img.id === selectedId ? ' grid-card--selected' : ''}`}
-              onClick={(e) => { e.stopPropagation(); onSelectImage(img.id); }}
-            >
-              <div className="grid-card__thumb-wrap">
-                {img.thumb_jpg ? (
-                  <img
-                    src={img.thumb_jpg}
-                    alt={displayName(img)}
-                    className="grid-card__thumb"
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="grid-card__placeholder">{img.id}</div>
-                )}
-                {img.is_georeferenced && <span className="grid-card__badge">GEO</span>}
-              </div>
-              <div className="grid-card__info">
-                <span className="grid-card__name">{displayName(img)}</span>
-                {img.date && <span className="grid-card__date">{img.date}</span>}
-              </div>
-            </div>
-            {globalI === globalInsertAfterIdx && selectedImage && (
-              <ExpandedItem
-                image={selectedImage}
-                onClose={() => onSelectImage(null)}
-                onFocusMap={onFocusMap}
-                onLightbox={onLightbox}
-                goPrev={goPrev}
-                goNext={goNext}
-                hasPrev={hasPrev}
-                hasNext={hasNext}
+      {images.slice(startIdx, endIdx).map((img) => (
+        <div
+          key={img.id}
+          className={`grid-card${img.id === selectedId ? ' grid-card--selected' : ''}`}
+          onClick={(e) => { e.stopPropagation(); onSelectImage(img.id); }}
+        >
+          <div className="grid-card__thumb-wrap">
+            {img.thumb_jpg ? (
+              <img
+                src={img.thumb_jpg}
+                alt={displayName(img)}
+                className="grid-card__thumb"
+                loading="lazy"
               />
+            ) : (
+              <div className="grid-card__placeholder">{img.id}</div>
             )}
-          </React.Fragment>
-        );
-      })}
+            {img.is_georeferenced && <span className="grid-card__badge">GEO</span>}
+          </div>
+          <div className="grid-card__info">
+            <span className="grid-card__name">{displayName(img)}</span>
+            {img.date && <span className="grid-card__date">{img.date}</span>}
+          </div>
+        </div>
+      ))}
       {bottomSpacerH > 0 && (
         <div style={{ gridColumn: '1 / -1', height: `${bottomSpacerH}px` }} aria-hidden="true" />
       )}
@@ -429,17 +376,10 @@ function GridView({ images, selectedId, selectedImage, onSelectImage, onFocusMap
 interface TableViewProps {
   images: ImageRecord[];
   selectedId: string | null;
-  selectedImage: ImageRecord | null | undefined;
   onSelectImage: (id: string | null) => void;
-  onFocusMap: (id: string) => void;
-  onLightbox: (src: string) => void;
   sortKey: SortKey;
   sortDir: SortDir;
   onSort: (key: SortKey) => void;
-  goPrev: () => void;
-  goNext: () => void;
-  hasPrev: boolean;
-  hasNext: boolean;
 }
 
 const TABLE_COLS: { key: SortKey; label: string }[] = [
@@ -449,7 +389,7 @@ const TABLE_COLS: { key: SortKey; label: string }[] = [
   { key: 'is_georeferenced', label: 'Georef' },
 ];
 
-function TableView({ images, selectedId, selectedImage, onSelectImage, onFocusMap, onLightbox, sortKey, sortDir, onSort, goPrev, goNext, hasPrev, hasNext }: TableViewProps) {
+function TableView({ images, selectedId, onSelectImage, sortKey, sortDir, onSort }: TableViewProps) {
   return (
     <table className="table-view">
       <thead>
@@ -471,40 +411,23 @@ function TableView({ images, selectedId, selectedImage, onSelectImage, onFocusMa
       </thead>
       <tbody>
         {images.map((img) => (
-          <React.Fragment key={img.id}>
-            <tr
-              className={`table-view__row${img.id === selectedId ? ' table-view__row--selected' : ''}`}
-              onClick={(e) => { e.stopPropagation(); onSelectImage(img.id); }}
-            >
-              <td className="table-view__td table-view__td--thumb">
-                {img.thumb_jpg ? (
-                  <img src={img.thumb_jpg} alt="" className="table-view__thumb" loading="lazy" />
-                ) : (
-                  <div className="table-view__thumb-placeholder" />
-                )}
-              </td>
-              <td className="table-view__td">{img.id}</td>
-              <td className="table-view__td">{img.date}</td>
-              <td className="table-view__td">{img.flight_id}</td>
-              <td className="table-view__td">{img.is_georeferenced ? '✓' : ''}</td>
-            </tr>
-            {img.id === selectedId && selectedImage && (
-              <tr className="table-view__expanded-row" onClick={(e) => e.stopPropagation()}>
-                <td colSpan={5}>
-                  <ExpandedItem
-                    image={selectedImage}
-                    onClose={() => onSelectImage(null)}
-                    onFocusMap={onFocusMap}
-                    onLightbox={onLightbox}
-                    goPrev={goPrev}
-                    goNext={goNext}
-                    hasPrev={hasPrev}
-                    hasNext={hasNext}
-                  />
-                </td>
-              </tr>
-            )}
-          </React.Fragment>
+          <tr
+            key={img.id}
+            className={`table-view__row${img.id === selectedId ? ' table-view__row--selected' : ''}`}
+            onClick={(e) => { e.stopPropagation(); onSelectImage(img.id); }}
+          >
+            <td className="table-view__td table-view__td--thumb">
+              {img.thumb_jpg ? (
+                <img src={img.thumb_jpg} alt="" className="table-view__thumb" loading="lazy" />
+              ) : (
+                <div className="table-view__thumb-placeholder" />
+              )}
+            </td>
+            <td className="table-view__td">{img.id}</td>
+            <td className="table-view__td">{img.date}</td>
+            <td className="table-view__td">{img.flight_id}</td>
+            <td className="table-view__td">{img.is_georeferenced ? '✓' : ''}</td>
+          </tr>
         ))}
       </tbody>
     </table>

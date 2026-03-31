@@ -764,11 +764,20 @@ body {
 
 /* ── Expanded item ── */
 
+.collection__expanded-panel {
+    flex-shrink: 0;
+    height: 320px;
+    border-top: 1px solid var(--border);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
 .expanded {
-    grid-column: 1 / -1;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
     background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
     overflow: hidden;
 }
 
@@ -850,7 +859,9 @@ body {
     display: flex;
     gap: 16px;
     padding: 12px;
-    max-height: 500px;
+    flex: 1;
+    overflow: hidden;
+    min-height: 0;
 }
 
 .expanded__viewer {
@@ -965,6 +976,10 @@ body {
 /* ── Mobile (<768px): stack vertically ── */
 
 @media (max-width: 767px) {
+    .collection__expanded-panel {
+        display: none;
+    }
+
     .archive {
         flex-direction: column;
     }
